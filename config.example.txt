@@ -1,0 +1,5 @@
+# Plantilla de configuracion de conexion JDBC para Arena Segura RPG
+# Copia este archivo como 'config.txt' y ajusta tus credenciales locales de MySQL
+url=jdbc:mysql://localhost:3306/rpg_arena_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+usuario=root
+clave=tu_contraseña_aqui
