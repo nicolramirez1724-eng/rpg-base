@@ -7,7 +7,9 @@ import com.rpg.entities.Personaje;
 
 import java.util.List;
 
-/** Torneo de 4 gladiadores: dos semifinales y una final. */
+/**
+ * Torneo de 4 gladiadores: dos semifinales en paralelo con hilos y join, y una final.
+ */
 public class TorneoManager {
 
     private final Arena arena;
@@ -18,16 +20,46 @@ public class TorneoManager {
         this.registro = registro;
     }
 
-    /** @return el campeon del torneo */
+    /**
+     * Simula el torneo ejecutando las dos semifinales en paralelo mediante hilos (Threads),
+     * sincronizandolas con join() antes de disputar la gran final.
+     *
+     * @return el campeon del torneo
+     */
     public Personaje jugarTorneo() {
         List<Personaje> gladiadores = crearGladiadores().getMiembros();
 
-        // TALLER CONCURRENCIA: las dos semifinales se simulan una tras otra en el hilo principal.
-        // La final solo puede empezar cuando ambas hayan terminado.
-        Personaje finalista1 = simularSemifinal(gladiadores.get(0), gladiadores.get(1));
-        Personaje finalista2 = simularSemifinal(gladiadores.get(2), gladiadores.get(3));
+        final Personaje[] ganadores = new Personaje[2];
 
-        return simularFinal(finalista1, finalista2);
+        Thread semiA = new Thread(() -> {
+            ganadores[0] = simularSemifinal(gladiadores.get(0), gladiadores.get(1));
+        }, "Hilo-Semifinal-A");
+
+        Thread semiB = new Thread(() -> {
+            ganadores[1] = simularSemifinal(gladiadores.get(2), gladiadores.get(3));
+        }, "Hilo-Semifinal-B");
+
+        // Estado inicial: NEW
+        registro.agregar("[Concurrencia] Estado inicial semiA: %s, semiB: %s", semiA.getState(), semiB.getState());
+
+        semiA.start();
+        semiB.start();
+
+        // Estado en ejecucion: RUNNABLE / TIMED_WAITING
+        registro.agregar("[Concurrencia] Tras start() - semiA: %s, semiB: %s", semiA.getState(), semiB.getState());
+
+        try {
+            semiA.join();
+            semiB.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            registro.agregar("[Torneo] Error: El torneo fue interrumpido: %s", e.getMessage());
+        }
+
+        // Estado final: TERMINATED
+        registro.agregar("[Concurrencia] Tras join() - semiA: %s, semiB: %s", semiA.getState(), semiB.getState());
+
+        return simularFinal(ganadores[0], ganadores[1]);
     }
 
     public Personaje simularSemifinal(Personaje a, Personaje b) {
