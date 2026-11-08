@@ -2,9 +2,10 @@ package com.rpg.items;
 
 import com.rpg.entities.EstadoEfecto;
 import com.rpg.entities.enums.RaridadItem;
+import java.io.Serializable;
 
-// TALLER ARCHIVOS: candidata a Serializable (guarda un EstadoEfecto, que tambien debe serlo).
-public class Pocion {
+public class Pocion implements Serializable {
+    private static final long serialVersionUID = 1L;
 
     private final String nombre;
     private final int curacion;
@@ -16,10 +17,6 @@ public class Pocion {
         this(nombre, curacion, raridad, null, false);
     }
 
-    /**
-     * @param efecto   efecto que se aplica al usarla (por ejemplo un HoT), o null
-     * @param purifica si es true, elimina los efectos de dano continuo (antidoto)
-     */
     public Pocion(String nombre, int curacion, RaridadItem raridad, EstadoEfecto efecto, boolean purifica) {
         this.nombre = nombre;
         this.curacion = curacion;
