@@ -1,13 +1,24 @@
 package com.rpg.core;
 
-/** Imprime cada evento del combate y lo guarda para incluirlo en el guardado de la partida. */
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
+/**
+ * Imprime cada evento del combate, lo acumula en memoria y lo respalda en disco
+ * mediante BufferedWriter y FileWriter (modo append).
+ */
 public class RegistroCombate {
 
+    private static final String ARCHIVO_LOG = "registro_combate.log";
     private final StringBuilder texto = new StringBuilder();
 
     public void agregar(String linea) {
         System.out.println(linea);
         texto.append(linea).append(System.lineSeparator());
+        volcarADisco(linea);
     }
 
     public void agregar(String formato, Object... argumentos) {
@@ -18,8 +29,17 @@ public class RegistroCombate {
         texto.setLength(0);
     }
 
-    // TALLER ARCHIVOS: aqui iria volcar el registro de combate a un archivo .txt (BufferedWriter + FileWriter,
-    // con append si quieres conservar combates anteriores) y leerlo de vuelta con BufferedReader.
+    private void volcarADisco(String linea) {
+        File archivo = new File(ARCHIVO_LOG);
+        try (BufferedWriter escritor = new BufferedWriter(new FileWriter(archivo, StandardCharsets.UTF_8, true))) {
+            escritor.write(linea);
+            escritor.newLine();
+            escritor.flush();
+        } catch (IOException e) {
+            System.err.printf("[RegistroCombate] Error escribiendo log a disco: %s%n", e.getMessage());
+        }
+    }
+
     public String getTexto() {
         return texto.toString();
     }
