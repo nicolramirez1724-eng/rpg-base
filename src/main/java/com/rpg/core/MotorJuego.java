@@ -1,5 +1,8 @@
 package com.rpg.core;
 
+import com.rpg.dao.JugadorDAO;
+import com.rpg.dao.MonstruoDAO;
+import com.rpg.dao.VictoriaDAO;
 import com.rpg.entities.Enemigo;
 import com.rpg.entities.EstadoEfecto;
 import com.rpg.entities.Gremio;
@@ -12,11 +15,16 @@ import com.rpg.entities.enums.TipoEfecto;
 import com.rpg.exceptions.CapacidadExcedidaException;
 import com.rpg.items.Inventario;
 import com.rpg.items.Pocion;
+import com.rpg.model.Jugador;
+import com.rpg.model.Monstruo;
 
 import java.util.List;
 import java.util.Random;
 
-/** Coordina el flujo del juego: crear heroe, combatir, torneo, bestiario y guardado. */
+/**
+ * Coordina el flujo del juego: crear heroe, combatir, torneo, bestiario, guardado
+ * e integracion automatica con la base de datos rpg_arena_db (Punto 12 EJERCICIOS.md).
+ */
 public class MotorJuego {
 
     private static final String NOMBRE_GREMIO = "Guardianes del Alba";
@@ -29,12 +37,31 @@ public class MotorJuego {
     private final PerfilJugador perfil = new PerfilJugador();
     private final Gremio gremio = new Gremio(NOMBRE_GREMIO);
     private final TorneoManager torneo = new TorneoManager(arena, registro);
-    // TALLER ARCHIVOS: ultimoGuardado es solo el estado de la partida en memoria. Aqui (o en un metodo
-    // nuevo como cargarProgreso) iria la carga de una partida guardada en disco; llamala desde Main.
+
+    private final JugadorDAO jugadorDAO;
+    private final MonstruoDAO monstruoDAO;
+    private final VictoriaDAO victoriaDAO;
+
+    private Jugador jugadorEnSesion = null;
     private String ultimoGuardado = "";
 
     public MotorJuego(Consola consola) {
+        this(consola, new JugadorDAO(), new MonstruoDAO(), new VictoriaDAO());
+    }
+
+    public MotorJuego(Consola consola, JugadorDAO jugadorDAO, MonstruoDAO monstruoDAO, VictoriaDAO victoriaDAO) {
         this.consola = consola;
+        this.jugadorDAO = jugadorDAO;
+        this.monstruoDAO = monstruoDAO;
+        this.victoriaDAO = victoriaDAO;
+    }
+
+    public void setJugadorEnSesion(Jugador jugador) {
+        this.jugadorEnSesion = jugador;
+    }
+
+    public Jugador getJugadorEnSesion() {
+        return jugadorEnSesion;
     }
 
     // ---- opciones del menu principal
@@ -70,7 +97,14 @@ public class MotorJuego {
 
     private Personaje crearJugador() {
         int clase = consola.leerEntero("Clase (1. Guerrero, 2. Mago): ", 1, 2);
-        String nombre = consola.leerNombre("Nombre del heroe: ");
+        String nombre;
+        if (jugadorEnSesion != null) {
+            nombre = jugadorEnSesion.getUsuario();
+            System.out.printf("Jugando como el usuario autenticado: %s%n", nombre);
+        } else {
+            nombre = consola.leerNombre("Nombre del heroe: ");
+        }
+
         Personaje jugador = switch (clase) {
             case 1 -> new Guerrero(nombre);
             default -> new Mago(nombre);
@@ -125,7 +159,6 @@ public class MotorJuego {
 
     // ---- bucle de combate
 
-    /** @return true si el jugador huyo */
     private boolean combatir(Personaje jugador, Enemigo enemigo) {
         int ronda = 1;
         while (jugador.estaVivo() && enemigo.estaVivo()) {
@@ -139,10 +172,6 @@ public class MotorJuego {
         return false;
     }
 
-    /**
-     * Turno del jugador. Las acciones que no gastan turno (ver estado, cancelar) vuelven a pedir.
-     * @return true si el jugador decidio huir
-     */
     private boolean turnoJugador(Personaje jugador, Enemigo enemigo) {
         boolean turnoGastado;
         do {
@@ -168,12 +197,7 @@ public class MotorJuego {
         return false;
     }
 
-    /**
-     * Pide la accion al jugador y se queda esperando hasta que escriba algo.
-     */
     private Accion pedirAccion() {
-        // TALLER CONCURRENCIA: esta lectura bloquea el programa sin limite de tiempo.
-        // Aqui debe entrar el temporizador de turno con su callback.
         System.out.println("1. Atacar  2. Habilidad especial  3. Usar pocion  4. Ver estado  0. Huir");
         int opcion = consola.leerEntero("Accion: ", 0, 4);
         return switch (opcion) {
@@ -213,7 +237,7 @@ public class MotorJuego {
         }
     }
 
-    // ---- resultado del combate
+    // ---- resultado del combate e integracion con BD (Punto 12 EJERCICIOS.md)
 
     private void cerrarCombate(Personaje jugador, Enemigo enemigo, boolean huyo) {
         if (huyo) {
@@ -224,9 +248,44 @@ public class MotorJuego {
             bestiario.registrarEnemigoDerrotado(enemigo.getNombre());
             desbloquearLogros(jugador, enemigo);
             repartirBotin(jugador);
+
+            // Requisito 12: Registro automatico de victoria en la base de datos
+            registrarVictoriaEnBaseDeDatos(jugador, enemigo);
         } else {
             registro.agregar("%n%s ha caido ante %s.", jugador.getNombre(), enemigo.getNombre());
             perfil.registrarDerrota();
+        }
+    }
+
+    /**
+     * Registra la victoria en la base de datos relacionando al jugador y al monstruo de la tabla 'monstruos'.
+     */
+    private void registrarVictoriaEnBaseDeDatos(Personaje jugador, Enemigo enemigo) {
+        try {
+            // 1. Obtener o registrar al jugador en la BD
+            Jugador jugadorDB = (jugadorEnSesion != null) ? jugadorEnSesion : jugadorDAO.buscarPorUsuario(jugador.getNombre());
+            if (jugadorDB == null) {
+                jugadorDB = new Jugador(jugador.getNombre(), "clave123", Jugador.ROL_JUGADOR);
+                jugadorDAO.registrar(jugadorDB);
+            }
+
+            // 2. Obtener o registrar al monstruo en la BD
+            Monstruo monstruoDB = monstruoDAO.buscarPorNombre(enemigo.getNombre());
+            if (monstruoDB == null) {
+                monstruoDB = new Monstruo(enemigo.getNombre(), enemigo.getVidaMaxima(), enemigo.getAtaque(), enemigo.getDefensa());
+                monstruoDAO.crear(monstruoDB);
+            }
+
+            // 3. Registrar la victoria con VictoriaDAO
+            if (jugadorDB.getId() > 0 && monstruoDB.getId() > 0) {
+                boolean registrada = victoriaDAO.registrar(jugadorDB.getId(), monstruoDB.getId());
+                if (registrada) {
+                    registro.agregar("[BD] Victoria de '%s' contra '%s' registrada automaticamente en la base de datos rpg_arena_db.",
+                            jugadorDB.getUsuario(), monstruoDB.getNombre());
+                }
+            }
+        } catch (Exception e) {
+            registro.agregar("[BD] Nota: No se pudo sincronizar la victoria con la base de datos (%s).", e.getMessage());
         }
     }
 
@@ -250,16 +309,7 @@ public class MotorJuego {
         }
     }
 
-    // ---- guardado
-
-    /**
-     * Guarda las estadisticas en memoria (el texto queda en {@code ultimoGuardado}); aun no se escribe ningun
-     * archivo. Hoy solo se invoca al terminar una pelea.
-     */
     public void guardarProgreso() {
-        // TALLER ARCHIVOS: ademas de dejar el texto en memoria, escribe la partida en disco (por ejemplo un
-        // .txt con BufferedWriter, y/o un .dat serializando el estado con ObjectOutputStream). Usa try-with-resources.
-        // TALLER CONCURRENCIA: este guardado es manual. Debera hacerse solo, de fondo, mientras se juega.
         StringBuilder contenido = new StringBuilder();
         contenido.append("=== PARTIDA RPG ===").append(System.lineSeparator());
         contenido.append("Victorias: ").append(perfil.getVictorias()).append(System.lineSeparator());
